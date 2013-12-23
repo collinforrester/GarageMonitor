@@ -28,7 +28,7 @@ public class HomeCommandHandler implements HttpRequestHandler {
         HttpEntity entity = new EntityTemplate(new ContentProducer() {
             public void writeTo(final OutputStream outstream) throws IOException {
                 OutputStreamWriter writer = new OutputStreamWriter(outstream, "UTF-8");
-                String resp = "<html><head></head><body><h1>Home<h1><p>This is the homepage.</p></body></html>";
+                String resp = "<html><head></head><body><h1>Home<h1><p>This is the homepage.</p><p>This is a test image: <img src=\"/sdcard/monitor-1387815502327.jpg\"></p></body></html>";
 
                 writer.write(resp);
                 writer.flush();

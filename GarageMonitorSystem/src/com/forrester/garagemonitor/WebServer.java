@@ -1,120 +1,96 @@
 package com.forrester.garagemonitor;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
+import java.io.InputStream;
+import java.net.FileNameMap;
+import java.net.URLConnection;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Random;
 
-import org.apache.http.HttpException;
-import org.apache.http.impl.DefaultConnectionReuseStrategy;
-import org.apache.http.impl.DefaultHttpResponseFactory;
-import org.apache.http.impl.DefaultHttpServerConnection;
-import org.apache.http.params.BasicHttpParams;
-import org.apache.http.protocol.BasicHttpContext;
-import org.apache.http.protocol.BasicHttpProcessor;
-import org.apache.http.protocol.HttpRequestHandlerRegistry;
-import org.apache.http.protocol.HttpService;
-import org.apache.http.protocol.ResponseConnControl;
-import org.apache.http.protocol.ResponseContent;
-import org.apache.http.protocol.ResponseDate;
-import org.apache.http.protocol.ResponseServer;
-
+import android.app.Service;
 import android.content.Context;
+import android.content.Intent;
+import android.util.Log;
+import fi.iki.elonen.NanoHTTPD;
+import fi.iki.elonen.NanoHTTPD.Response.Status;
 
-public class WebServer {
+public class WebServer extends NanoHTTPD {
+	private Context mContext;
+	private Service mService;
+	private static String TAG = "WebServer";
+	public static final String MIME_PLAINTEXT = "text/plain",
+			MIME_HTML = "text/html", MIME_JS = "application/javascript",
+			MIME_CSS = "text/css", MIME_PNG = "image/png"
+			,
+			MIME_DEFAULT_BINARY = "application/octet-stream",
+			MIME_XML = "text/xml";
+	private static final Status HTTP_OK = Status.OK;
 
-    public static boolean RUNNING = false;
-    public static int serverPort = 8080;
+	public WebServer(Context c, Service s) {
+		super(8080);
+		mService = s;
+		mContext = c;
+	}
 
-    private static final String ALL_PATTERN = "*";
-    private static final String EXCEL_PATTERN = "/*.xls";
-    private static final String HOME_PATTERN = "/home.html";
+	public WebServer(Context c, Integer port) {
+		super(port);
+		mContext = c;
+	}
 
-    private Context context = null;
+	@Override
+	public Response serve(IHTTPSession session) {
+		String uri = session.getUri();
+		Log.d(TAG, "SERVE ::  URI " + uri);
+		Map<String, String> parms = session.getParms();
+		final StringBuilder buf = new StringBuilder();
 
-    private BasicHttpProcessor httpproc = null;
-    private BasicHttpContext httpContext = null;
-    private HttpService httpService = null;
-    private HttpRequestHandlerRegistry registry = null;
+		InputStream mbuffer = null;
 
-    public WebServer(Context context) {
-        this.setContext(context);
+		try {
+			if (uri != null) {
 
-        httpproc = new BasicHttpProcessor();
-        httpContext = new BasicHttpContext();
+				if (uri.contains(".js")) {
+					mbuffer = mContext.getAssets().open(uri.substring(1));
+					return new NanoHTTPD.Response(HTTP_OK, MIME_JS, mbuffer);
+				} else if (uri.contains(".css")) {
+					mbuffer = mContext.getAssets().open(uri.substring(1));
+					return new NanoHTTPD.Response(HTTP_OK, MIME_CSS, mbuffer);
 
-        httpproc.addInterceptor(new ResponseDate());
-        httpproc.addInterceptor(new ResponseServer());
-        httpproc.addInterceptor(new ResponseContent());
-        httpproc.addInterceptor(new ResponseConnControl());
+				} else if (uri.contains(".png")) {
+					mbuffer = mContext.getAssets().open(uri.substring(1));
+					return new NanoHTTPD.Response(HTTP_OK, MIME_PNG, mbuffer);
+				} else if (uri.contains("/mnt/sdcard")) {
+					Log.d(TAG, "request for media on sdCard " + uri);
+					File request = new File(uri);
+					mbuffer = new FileInputStream(request);
+					FileNameMap fileNameMap = URLConnection.getFileNameMap();
+					String mimeType = fileNameMap.getContentTypeFor(uri);
 
-        httpService = new HttpService(httpproc,
-                new DefaultConnectionReuseStrategy(), new DefaultHttpResponseFactory());
+					Response streamResponse = new Response(HTTP_OK, mimeType,
+							mbuffer);
+					Random rnd = new Random();
+					String etag = Integer.toHexString(rnd.nextInt());
+					streamResponse.addHeader("ETag", etag);
+					streamResponse.addHeader("Connection", "Keep-alive");
 
-        registry = new HttpRequestHandlerRegistry();
+					return streamResponse;
+				} else if (uri.contains("takephoto")) {
+					mService.sendBroadcast(new Intent(MainActivity.PHOTO_COMMAND_CODE));
+				} else {
+					mbuffer = mContext.getAssets().open("index.html");
+					return new NanoHTTPD.Response(HTTP_OK, MIME_HTML, mbuffer);
+				}
+			}
 
-        registry.register(HOME_PATTERN, new HomeCommandHandler(context));
+		} catch (IOException e) {
+			Log.d(TAG, "Error opening file" + uri.substring(1));
+			e.printStackTrace();
+		}
 
-        httpService.setHandlerResolver(registry);
-    }
+		return null;
 
-    private ServerSocket serverSocket;
-
-    public void runServer() {
-        try {
-            serverSocket = new ServerSocket(serverPort);
-
-            serverSocket.setReuseAddress(true);
-
-            while (RUNNING) {
-                try {
-                    final Socket socket = serverSocket.accept();
-
-                    DefaultHttpServerConnection serverConnection = new DefaultHttpServerConnection();
-
-                    serverConnection.bind(socket, new BasicHttpParams());
-
-                    httpService.handleRequest(serverConnection, httpContext);
-
-                    serverConnection.shutdown();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                } catch (HttpException e) {
-                    e.printStackTrace();
-                }
-            }
-
-            serverSocket.close();
-        } catch (SocketException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        RUNNING = false;
-    }
-
-    public synchronized void startServer() {
-        RUNNING = true;
-        runServer();
-    }
-
-    public synchronized void stopServer() {
-        RUNNING = false;
-        if (serverSocket != null) {
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    public void setContext(Context context) {
-        this.context = context;
-    }
-
-    public Context getContext() {
-        return context;
-    }
+	}
 }

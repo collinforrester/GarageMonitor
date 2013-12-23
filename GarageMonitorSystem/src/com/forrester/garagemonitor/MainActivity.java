@@ -1,5 +1,6 @@
 package com.forrester.garagemonitor;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -17,10 +18,13 @@ import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.StrictMode;
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.hardware.Camera;
 import android.hardware.Camera.PictureCallback;
@@ -36,10 +40,11 @@ import android.widget.ImageView;
 
 public class MainActivity extends Activity {
 	private String TAG = "MainActivity";
-
-    Camera camera;
-    Preview preview;
-    Button buttonClick;
+	public static String PHOTO_COMMAND_CODE = "TAKEPHOTO";
+	Camera camera;
+	Preview preview;
+	Button buttonClick;
+	PhotoCommandReceiver photoCommandReceiver;
 
 	private static final int REQUEST_CODE = 1;
 
@@ -49,80 +54,104 @@ public class MainActivity extends Activity {
 		setContentView(R.layout.activity_main);
 		final Context c = getApplicationContext();
 		preview = new Preview(this);
-        ((FrameLayout) findViewById(R.id.preview)).addView(preview);
+		((FrameLayout) findViewById(R.id.preview)).addView(preview);
 
-        buttonClick = (Button) findViewById(R.id.button1);
-        buttonClick.setOnClickListener(new OnClickListener() {
-              public void onClick(View v) {
-                    preview.camera.takePicture(shutterCallback, rawCallback,
-                                jpegCallback);
-              }
-        });
+		buttonClick = (Button) findViewById(R.id.button1);
+		buttonClick.setOnClickListener(new OnClickListener() {
+			public void onClick(View v) {
+				preview.camera.takePicture(shutterCallback, rawCallback,
+						jpegCallback);
+			}
+		});
 		WifiManager wifiManager = (WifiManager) getSystemService(WIFI_SERVICE);
 		WifiInfo wifiInfo = wifiManager.getConnectionInfo();
 		int ipAddress = wifiInfo.getIpAddress();
 		String ip = intToIp(ipAddress);
 
-		Log.d(TAG, "IP Address: " + getLocalIpAddress() + " OR " + ip);
-		Thread thread = new Thread(new Runnable() {
-			@Override
-			public void run() {
-				try {
+		Log.i(TAG, "IP Address: " + getLocalIpAddress() + " OR " + ip);
+		startService(new Intent(getApplicationContext(), WebServerService.class));
+		Log.i(TAG, "Start service command sent.");
 
-					// Intent serviceIntent = new Intent();
-					// serviceIntent.setAction("com.forrester.garagemonitor.WebServerService");
-					// startService(serviceIntent);
-					Log.d(TAG, "Start service command sent.");
-
-					WebServer server = new WebServer(MainActivity.this);
-					server.startServer();
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		});
-
-		thread.start();
 	}
 
 	ShutterCallback shutterCallback = new ShutterCallback() {
-        public void onShutter() {
-              Log.d(TAG, "onShutter'd");
-        }
-  };
+		public void onShutter() {
+			Log.i(TAG, "onShutter'd");
+		}
+	};
 
-  /** Handles data for raw picture */
-  PictureCallback rawCallback = new PictureCallback() {
-        public void onPictureTaken(byte[] data, Camera camera) {
-              Log.d(TAG, "onPictureTaken - raw");
-        }
-  };
+	/** Handles data for raw picture */
+	PictureCallback rawCallback = new PictureCallback() {
+		public void onPictureTaken(byte[] data, Camera camera) {
+			Log.i(TAG, "onPictureTaken - raw");
+		}
+	};
 
-  /** Handles data for jpeg picture */
-  PictureCallback jpegCallback = new PictureCallback() {
-        public void onPictureTaken(byte[] data, Camera camera) {
-              FileOutputStream outStream = null;
-              try {
-                   
-                    outStream = new FileOutputStream(String.format(
-                                "/sdcard/downloads/%d.jpg", System.currentTimeMillis()));
-                    outStream.write(data);
-                    outStream.close();
-                    Log.d(TAG, "I JUST SAVED A MOTHOFUCKING PHTO");
-                   
-              } catch (FileNotFoundException e) {
-                    e.printStackTrace();
-              } catch (IOException e) {
-                    e.printStackTrace();
-              }
-       
-        }
-  };
+	/** Handles data for jpeg picture */
+	PictureCallback jpegCallback = new PictureCallback() {
+		public void onPictureTaken(byte[] data, Camera camera) {
+			FileOutputStream outStream = null;
+			File folder = new File(Environment.getExternalStorageDirectory()
+					+ "/monitor");
+			boolean success = true;
+			if (!folder.exists()) {
+				success = folder.mkdir();
+			}
+			if (success) {
+				// Do something on success
+			} else {
+				// Do something else on failure
+			}
+			File photo = new File(Environment.getExternalStorageDirectory(),
+					String.format("monitor/monitor-%d.jpg",
+							System.currentTimeMillis()));
+			try {
+				Log.i(TAG, "data size length: " + data.length);
+				outStream = new FileOutputStream(photo.getPath());
+				outStream.write(data);
+				outStream.close();
+				Log.i(TAG, "I JUST SAVED A MOTHOFUCKING PHTO");
+
+			} catch (FileNotFoundException e) {
+				e.printStackTrace();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+
+		}
+	};
+
+	private class PhotoCommandReceiver extends BroadcastReceiver {
+		@Override
+		public void onReceive(Context context, Intent intent) {
+			if (intent.getAction().equals(MainActivity.PHOTO_COMMAND_CODE)) {
+				// Do stuff - maybe update my view based on the changed DB
+				// contents
+			}
+		}
+	}
 
 	public String intToIp(int i) {
 
 		return ((i >> 24) & 0xFF) + "." + ((i >> 16) & 0xFF) + "."
 				+ ((i >> 8) & 0xFF) + "." + (i & 0xFF);
+	}
+
+	@Override
+	public void onResume() {
+		super.onResume();
+		if (photoCommandReceiver == null)
+			photoCommandReceiver = new PhotoCommandReceiver();
+		IntentFilter intentFilter = new IntentFilter(
+				MainActivity.PHOTO_COMMAND_CODE);
+		registerReceiver(photoCommandReceiver, intentFilter);
+	}
+
+	@Override
+	public void onPause() {
+		super.onPause();
+		if (photoCommandReceiver != null)
+			unregisterReceiver(photoCommandReceiver);
 	}
 
 	@Override
@@ -140,8 +169,8 @@ public class MainActivity extends Activity {
 				for (Enumeration<InetAddress> enumIpAddr = intf
 						.getInetAddresses(); enumIpAddr.hasMoreElements();) {
 					InetAddress inetAddress = enumIpAddr.nextElement();
-					// Log.d(TAG, "inetAddress : " +
-					// inetAddress.getHostAddress().toString());
+					Log.i(TAG, "inetAddress : "
+							+ inetAddress.getHostAddress().toString());
 					if (!inetAddress.isLoopbackAddress()) {
 						return inetAddress.getHostAddress().toString();
 					}
